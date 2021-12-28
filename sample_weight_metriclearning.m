@@ -8,12 +8,12 @@ MaxIter = 100;
 % [D,S] = createSD(data,label);
 Id_matrix = eye(n_fea,n_fea);
 M = Id_matrix;
-weight = ones(n_sam,1);
-weight0 = weight;
+weight =  ones(n_sam,1);
 DD_matrix = zeros(n_sam,n_sam);
-for i = 1:n_sam
-    DD_matrix(i,i) = sum(sqrt(data(i,:).^2));
+for i = 1:n_sam%这个地方错了 
+    DD_matrix(i,i) = sqrt(sum(data(i,:).^2));
 end
+a_vec = sum(DD_matrix,2);
 
 for iter = 1:MaxIter
     % Update M
@@ -23,33 +23,13 @@ for iter = 1:MaxIter
     M = compute_AjingB(inv(XS  + parameter.gamma * Id_matrix), XD +  parameter.gamma * Id_matrix,parameter.t);
     
     [QD,QS] = compute_QD_QS(data,S,D,M);
-    H = QD + QS +  2 * parameter.mu * DD_matrix;
-    H = (H + H')/2;
-    f = 2*parameter.mu * DD_matrix * weight0;
-    AA = zeros(n_sam + 1,n_sam+1);
-    AA(1:n_sam,1:n_sam) = H;
-    AA(1:n_sam,n_sam+1) = ones(n_sam,1);
-    AA(n_sam+1,1:n_sam) = ones(1,n_sam);
-    AA(n_sam+1,n_sam+1) = 0;
-    bb = zeros(n_sam+1,1);
-    bb(1:n_sam,1) = f;
-    bb(n_sam+1,1) = n_sam;
-    tic;
-    solve = pinv(AA)*bb;
-    toc;
-%     solve = Gauss(AA,bb);
-    weight = solve(1:n_sam);
-    
-%     options = optimoptions(@quadprog,'Algorithm','active-set');
-% %     disp('add the shang jie');
-%     [weight,~,~,~,~] = quadprog(H,f,[],[],ones(1,n_sam),n_sam,zeros(n_sam,1),[],weight0,options);
-% %     weight = 2* mu * inv(H) * weight0;
-% %     plot(weight);
+    H = QD + QS +  parameter.mu * DD_matrix;
+    weight = pinv(H) * parameter.mu * parameter.theta * a_vec;
 
     Dsld = trace(M) + trace(inv(M))-2*n_fea;
     obj1 = parameter.gamma * Dsld ;
     obj2 =  0.5 * weight' * (QS+QD)*weight;
-    obj3 = parameter.mu * (weight-weight0)'*(weight-weight0);
+    obj3 = parameter.mu * (0.5 * weight' * DD_matrix * weight - parameter.theta * weight'* a_vec);
     
     obj = obj1 + obj2 + obj3;
     disp(['obj = ',num2str(obj), ';obj1= ',num2str(obj1),'; obj2=',num2str(obj2),'; obj3=',num2str(obj3)]);
@@ -81,19 +61,18 @@ end
 function [XD,XS] = compute_XD_XS(data,S,D,weight)
 % compute \sum_{{i,j}\in S}(w_ix_i-w_jx_j)(w_ix_i-w_jx_j)^T
 % compute \sum_{{i,j}\in D}(w_ix_i-w_jx_j)(w_ix_i-w_jx_j)^T
-[n_sam,n_fea] = size(data);
+[n_fea] = size(data,2);
 XD = zeros(n_fea,n_fea);
 XS = zeros(n_fea,n_fea);
-for i = 1:n_sam-1
-    for j = i+1:n_sam
-        one_vec = weight(i) * data(i,:)- weight(j) * data(j,:);
-        if S(i,j) == 1
-            XS = XS + one_vec' * one_vec;
-        end
-        if D(i,j) == 1
-            XD = XD + one_vec' * one_vec;
-        end
-    end
+[X_Si,X_Sj] = find(S==1);
+for i = 1:length(X_Si)
+     one_vec = weight(X_Si(i)) * data(X_Si(i),:)- weight(X_Sj(i)) * data(X_Sj(i),:);
+     XS = XS + one_vec' * one_vec;
+end
+[X_Di,X_Dj] = find(D==1);
+for i = 1:length(X_Di)
+     one_vec = weight(X_Di(i)) * data(X_Di(i),:)- weight(X_Dj(i)) * data(X_Dj(i),:);
+     XD = XD + one_vec' * one_vec;
 end
 end
 
@@ -107,25 +86,20 @@ D_diag = sum(D);
 L_D = diag(D_diag) - D;
 S_diag = sum(S);
 L_S = diag(S_diag) - S;
+M_inv = pinv(M);
 for i = 1:n_sam
-    one = data(i,:);
-    for j = 1:n_sam
-        two = data(j,:);
-        if i==j
-            QS_matrix(i,j) = one * M * two';
-            QD_matrix(i,j) = one * inv(M) * two';
-        end
-        if S(i,j) == 1
-            QS_matrix(i,j) = one * M * two';
-        end
-        if D(i,j) == 1
-            QD_matrix(i,j) = one * inv(M) * two';
-        end
-    end
+     one = data(i,:);
+     QS_matrix(i,i) = one * M * one';
+     QD_matrix(i,i) = one * M_inv * one';
+end
+[X_Si,X_Sj] = find(S == 1);
+for i = 1:length(X_Si)
+    QS_matrix(X_Si(i),X_Sj(i)) = data(X_Si(i),:) * M * data(X_Sj(i),:)';
+end
+[X_Di,X_Dj] = find(D == 1);
+for i = 1:length(X_Di)
+    QD_matrix(X_Di(i),X_Dj(i)) = data(X_Di(i),:) * M_inv * data(X_Dj(i),:)';
 end
 QD = QD_matrix.*L_D;
 QS = QS_matrix.*L_S;
-end
-function value = vec(x)
-    value = x(:);
 end
